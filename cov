@@ -1,0 +1,86 @@
+The latest version of the SBI specification includes a Performance Monitoring
+Unit(PMU) extension[1] which allows the supervisor to start/stop/configure
+various PMU events. The Sscofpmf ('Ss' for Privileged arch and Supervisor-level
+extensions, and 'cofpmf' for Count OverFlow and Privilege Mode Filtering)
+extension[2] allows the perf like tool to handle overflow interrupts and
+filtering support.
+
+This series implements full PMU infrastructure to support
+PMU in virt machine. This will allow us to add any PMU events in future.
+
+Currently, this series enables the following omu events.
+1. cycle count
+2. instruction count
+3. DTLB load/store miss
+4. ITLB prefetch miss
+
+The first two are computed using host ticks while last three are counted during
+cpu_tlb_fill. We can do both sampling and count from guest userspace.
+This series has been tested on both RV64 and RV32. Both Linux[3] and Opensbi[4]
+patches are required to get the perf working.
+
+Here is an output of perf stat/report while running hackbench with OpenSBI & Linux
+kernel patches applied [3].
+
+Perf stat:
+==========
+
+[root@fedora-riscv riscv]# perf stat -e r8000000000000005 -e r8000000000000007
+-e r8000000000000006 -e r0000000000020002 -e r0000000000020004 -e branch-misses
+-e cache-misses -e dTLB-load-misses -e dTLB-store-misses -e iTLB-load-misses
+-e cycles -e instructions ./hackbench -pipe 15 process
+Running with 15*40 (== 600) tasks.
+Time: 6.578
+
+ Performance counter stats for './hackbench -pipe 15 process':
+
+             6,491      r8000000000000005      (52.59%) --> SBI_PMU_FW_SET_TIMER
+            20,433      r8000000000000007      (60.74%) --> SBI_PMU_FW_IPI_RECVD
+            21,271      r8000000000000006      (68.71%) --> SBI_PMU_FW_IPI_SENT
+                 0      r0000000000020002      (76.55%)
+     <not counted>      r0000000000020004      (0.00%)
+     <not counted>      branch-misses          (0.00%)
+     <not counted>      cache-misses           (0.00%)
+        57,537,853      dTLB-load-misses       (9.49%)
+         2,821,147      dTLB-store-misses      (18.64%)
+        52,928,130      iTLB-load-misses       (27.53%)
+    89,521,791,110      cycles                 (36.08%)
+    90,678,132,464      instructions #    1.01  insn per cycle (44.44%)
+
+       6.975908032 seconds time elapsed
+
+       3.130950000 seconds user
+      24.353310000 seconds sys
+
+The patches can also be found in the github[4].
+
+Perf record:
+============
+
+[root@fedora-riscv riscv]# perf record -e cycles -e instructions -e \
+dTLB-load-misses -e dTLB-store-misses -c 1000 ./hackbench -pipe 15 process 15
+Running with 15*40 (== 600) tasks.
+Time: 1.238
+[ perf record: Woken up 1 times to write data ]
+[ perf record: Captured and wrote 0.106 MB perf.data (1020 samples) ]
+
+[root@fedora-riscv riscv]# perf report  
+Available samples                                                               
+372 cycles                                                                     ◆
+372 instructions                                                               ▒
+262 dTLB-load-misses                                                           ▒
+14 dTLB-store-misses        
+
+Changes from v1->v2:
+1. Dropped the ACks from v1 as signficant changes happened after v1.
+2. sscofpmf support.
+3. A generic counter management framework.
+
+[1] https://github.com/riscv-non-isa/riscv-sbi-doc/blob/master/riscv-sbi.adoc
+[2] https://drive.google.com/file/d/171j4jFjIkKdj5LWcExphq4xG_2sihbfd/edit
+[3] https://github.com/atishp04/opensbi/tree/pmu_sscofpmf 
+[3] https://github.com/atishp04/linux/tree/riscv_pmu_v3
+[4] https://github.com/atishp04/qemu/tree/riscv_pmu_v2
+
+option-subject Improve PMU support
+option-prefix  RFC v2
